@@ -1,0 +1,69 @@
+[project]
+name = "xai-inv"
+version = "0.1.0"
+description = "Invariance of XAI explanations for LLM-text detectors under meaning-preserving text transformations"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "Mateusz Baran" },
+    { name = "Jakub Kowalczyk" },
+    { name = "Kinga Świderek" },
+]
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "datasets",
+    "ferret-xai",
+    "nltk",
+    "omegaconf",
+    "pandas",
+    "pandas-stubs~=3.1.0",
+    "pyarrow",
+    "scipy",
+    "sentence-transformers",
+    "simalign",
+    "textattack",
+    "torch",
+    "transformers",
+    "typer",
+    "wandb",
+]
+
+[project.optional-dependencies]
+captum = ["captum"]
+
+[project.scripts]
+xai-inv = "xai_inv.cli:app"
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "pytest",
+    "ruff",
+]
+
+# PyPI torch wheels for Windows are CPU-only; Linux (Colab, Kaggle) keeps the PyPI CUDA build.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu132", marker = "sys_platform == 'win32'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xai_inv"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

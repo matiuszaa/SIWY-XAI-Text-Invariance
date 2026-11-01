@@ -1,0 +1,21 @@
+name: small
+seed: 42
+
+paths:
+  raw: data/raw
+  interim: data/interim
+
+data:
+  dataset: Hello-SimpleAI/HC3
+  revision: 4d0ff18143b5a7e1b1e79beb540c04549d1e59d3
+  n_texts: 100
+  min_words: 50
+  max_words: 150
+
+detector:
+  model: Hello-SimpleAI/chatgpt-detector-roberta
+  device: cuda
+
+explainers:
+  ig:
+    n_steps: 50
