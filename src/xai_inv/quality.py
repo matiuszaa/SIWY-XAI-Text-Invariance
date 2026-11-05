@@ -16,7 +16,6 @@ PREDICTION_COLUMNS = [
 
 
 def filter_by_detector(cfg: DictConfig) -> Path:
-    """Score both sides of each pair and reject detector decision changes."""
     interim_dir = Path(cfg.paths.interim)
     pairs_path = interim_dir / "pairs.parquet"
     if not pairs_path.is_file():

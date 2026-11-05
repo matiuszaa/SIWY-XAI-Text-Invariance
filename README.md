@@ -34,7 +34,7 @@ xai-inv run --config configs/smoke.yaml
 | Etap        | Co robi                                                          | Stan                                                      |
 |-------------|------------------------------------------------------------------|-----------------------------------------------------------|
 | `prepare`   | pobranie HC3, filtr 50-150 słów, losowanie                       | gotowy                                                    |
-| `transform` | synonimy WordNet, back-translation, parafraza T5                 | do zrobienia                                              |
+| `transform` | synonimy WordNet, back-translation, parafraza T5                 | synonimy gotowe; pozostałe transformacje do zrobienia     |
 | `filter`    | podobieństwo SBERT, stosunek długości, ta sama decyzja detektora | do zrobienia                                              |
 | `explain`   | predykcje i atrybucje IG (ferret) zagregowane do słów oryginału  | gotowy; LIME/SHAP i pary po transformacji są do zrobienia |
 | `metrics`   | wyrównanie słów, Spearman, Top-k Jaccard, cosinus, baseline'y    | do zrobienia                                              |

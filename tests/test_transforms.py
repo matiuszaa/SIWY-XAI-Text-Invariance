@@ -24,6 +24,17 @@ def test_synonym_pair_keeps_identity_alignment_for_same_length_result():
     }
 
 
+def test_wordnet_augmenter_preserves_punctuation_and_word_count(monkeypatch):
+    augmenter = transforms.WordNetSynonymAugmenter(fraction=1.0)
+    monkeypatch.setattr(
+        augmenter,
+        "_candidates",
+        lambda word: ["little"] if word.lower() == "small" else [],
+    )
+
+    assert augmenter.augment("A small cat.") == ["A little cat."]
+
+
 @pytest.mark.parametrize(
     ("result", "reason"),
     [

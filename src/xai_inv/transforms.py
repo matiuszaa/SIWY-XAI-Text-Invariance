@@ -1,4 +1,5 @@
 import random
+import re
 from pathlib import Path
 from typing import Protocol
 
@@ -6,9 +7,62 @@ import numpy as np
 import pandas as pd
 from omegaconf import DictConfig
 
+WORD_TOKEN = re.compile(r"^([^A-Za-z]*)([A-Za-z]+)([^A-Za-z]*)$")
+
 
 class Augmenter(Protocol):
     def augment(self, text: str) -> list[str]: ...
+
+
+class WordNetSynonymAugmenter:
+    def __init__(self, fraction: float):
+        self.fraction = fraction
+
+    @staticmethod
+    def _candidates(word: str) -> list[str]:
+        from nltk.corpus import wordnet
+
+        try:
+            synsets = wordnet.synsets(word)
+        except LookupError:
+            import nltk
+
+            if not nltk.download("wordnet", quiet=True):
+                raise RuntimeError("Could not download the NLTK WordNet corpus") from None
+            synsets = wordnet.synsets(word)
+
+        candidates = {
+            lemma.name()
+            for synset in synsets
+            for lemma in synset.lemmas()
+            if lemma.name().isalpha() and lemma.name().lower() != word.lower()
+        }
+        return sorted(candidates)
+
+    def augment(self, text: str) -> list[str]:
+        tokens = text.split()
+        eligible = []
+        for index, token in enumerate(tokens):
+            match = WORD_TOKEN.match(token)
+            if match is None or len(match.group(2)) < 3:
+                continue
+            candidates = self._candidates(match.group(2))
+            if candidates:
+                eligible.append((index, match, candidates))
+
+        if not eligible:
+            return []
+
+        n_replacements = min(len(eligible), max(1, round(len(eligible) * self.fraction)))
+        for index, match, candidates in random.sample(eligible, n_replacements):
+            replacement = random.choice(candidates)
+            original_word = match.group(2)
+            if original_word.isupper():
+                replacement = replacement.upper()
+            elif original_word.istitle():
+                replacement = replacement.title()
+            tokens[index] = f"{match.group(1)}{replacement}{match.group(3)}"
+        return [" ".join(tokens)]
 
 
 PAIR_COLUMNS = [
@@ -29,10 +83,7 @@ PAIR_COLUMNS = [
 def build_synonym_augmenter(fraction: float) -> Augmenter:
     if not 0 < fraction <= 1:
         raise ValueError(f"synonyms.fraction must be in (0, 1], got {fraction}")
-
-    from textattack.augmentation import WordNetAugmenter
-
-    return WordNetAugmenter(pct_words_to_swap=fraction, transformations_per_example=1)
+    return WordNetSynonymAugmenter(fraction)
 
 
 def synonym_pair(text: str, augmenter: Augmenter) -> dict[str, object]:
