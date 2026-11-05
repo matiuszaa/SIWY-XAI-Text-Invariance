@@ -23,3 +23,6 @@ transforms:
 explainers:
   ig:
     n_steps: 5
+
+metrics:
+  top_k_fraction: 0.1

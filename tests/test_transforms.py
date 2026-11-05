@@ -29,7 +29,7 @@ def test_synonym_pair_keeps_identity_alignment_for_same_length_result():
     [
         ([], "no_candidate"),
         (["A small cat sleeps."], "unchanged"),
-        (["A tiny feline sleeps."], "word_count_changed"),
+        (["A very tiny feline sleeps."], "word_count_changed"),
     ],
 )
 def test_synonym_pair_rejects_unsafe_results(result, reason):
