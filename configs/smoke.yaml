@@ -16,6 +16,10 @@ detector:
   model: hf-internal-testing/tiny-random-RobertaForSequenceClassification
   device: cpu
 
+transforms:
+  synonyms:
+    fraction: 0.1
+
 explainers:
   ig:
     n_steps: 5

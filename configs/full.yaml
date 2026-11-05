@@ -16,6 +16,10 @@ detector:
   model: Hello-SimpleAI/chatgpt-detector-roberta
   device: cuda
 
+transforms:
+  synonyms:
+    fraction: 0.1
+
 explainers:
   ig:
     n_steps: 50

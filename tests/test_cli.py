@@ -11,7 +11,7 @@ runner = CliRunner()
 
 
 def test_configs_exist():
-    assert {p.stem for p in CONFIGS} == {"smoke", "small", "full"}
+    assert {p.stem for p in CONFIGS} == {"smoke", "small", "full", "prototype"}
 
 
 @pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.stem)
@@ -21,7 +21,7 @@ def test_config_loads(path):
     assert cfg.data.n_texts > 0
 
 
-@pytest.mark.parametrize("command", ["transform", "filter", "metrics", "report"])
+@pytest.mark.parametrize("command", ["filter", "metrics", "report"])
 def test_command_runs(command):
     result = runner.invoke(app, [command, "--config", str(CONFIGS[0])])
     assert result.exit_code == 0, result.output

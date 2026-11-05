@@ -6,6 +6,7 @@ import typer
 from xai_inv import data
 from xai_inv.config import load_config
 from xai_inv.explanations import explain_texts
+from xai_inv.transforms import transform_synonyms
 
 app = typer.Typer(help="XAI explanation invariance under meaning-preserving text transformations.")
 
@@ -31,7 +32,9 @@ def prepare(config: ConfigOption = DEFAULT_CONFIG) -> None:
 
 @app.command()
 def transform(config: ConfigOption = DEFAULT_CONFIG) -> None:
-    _not_implemented("transform", config)
+    cfg = load_config(config)
+    out_path = transform_synonyms(cfg)
+    typer.echo(f"[{cfg.name}] transformed pairs written to {out_path}")
 
 
 @app.command(name="filter")
@@ -59,8 +62,9 @@ def report(config: ConfigOption = DEFAULT_CONFIG) -> None:
 @app.command()
 def run(config: ConfigOption = DEFAULT_CONFIG) -> None:
     prepare(config)
+    transform(config)
     explain(config)
-    for stage in ["transform", "filter", "metrics", "report"]:
+    for stage in ["filter", "metrics", "report"]:
         _not_implemented(stage, config)
 
 
