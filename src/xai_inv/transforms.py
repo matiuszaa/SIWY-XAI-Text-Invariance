@@ -1,10 +1,11 @@
+import hashlib
+import json
 import random
 import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-import numpy as np
 import pandas as pd
 import torch
 from omegaconf import DictConfig, OmegaConf
@@ -13,6 +14,7 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 WORD_TOKEN = re.compile(r"^([^A-Za-z]*)([A-Za-z]+)([^A-Za-z]*)$")
 PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
 MAX_NEW_TOKENS = 256
+SAVE_EVERY = 20
 
 
 class Augmenter(Protocol):
@@ -158,6 +160,7 @@ PAIR_COLUMNS = [
     "word_alignment",
     "transformation_status",
     "transformation_reason",
+    "transform_hash",
 ]
 
 
@@ -252,6 +255,26 @@ def build_augmenter(name: str, params: DictConfig) -> Augmenter:
     raise ValueError(f"Unknown transformation: {name}")
 
 
+def transform_hash(seed: int, name: str, params: DictConfig) -> str:
+    payload = {"seed": seed, "name": name, "params": OmegaConf.to_container(params)}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def load_cached_pairs(path: Path) -> dict[str, dict]:
+    if not path.is_file():
+        return {}
+    cached = pd.read_parquet(path)
+    if "transform_hash" not in cached.columns:
+        return {}
+    return {pair["pair_id"]: pair for pair in cached.to_dict("records")}
+
+
+def write_pairs(rows: list[dict], path: Path) -> None:
+    tmp_path = path.with_suffix(".tmp")
+    pd.DataFrame(rows, columns=PAIR_COLUMNS).to_parquet(tmp_path, index=False)
+    tmp_path.replace(path)
+
+
 def transform_texts(cfg: DictConfig) -> Path:
     interim_dir = Path(cfg.paths.interim)
     texts_path = interim_dir / "texts.parquet"
@@ -265,25 +288,41 @@ def transform_texts(cfg: DictConfig) -> Path:
         missing = ", ".join(sorted(missing_columns))
         raise ValueError(f"Prepared texts missing required columns: {missing}")
 
+    out_path = interim_dir / "pairs.parquet"
+    done = load_cached_pairs(out_path)
     rows = []
+    n_new = 0
     for name, params in cfg.transforms.items():
-        random.seed(int(cfg.seed))
-        np.random.seed(int(cfg.seed))
-        augmenter = build_augmenter(name, params)
-        make_pair = PAIR_BUILDERS[name]
+        if name not in PAIR_BUILDERS:
+            raise ValueError(f"Unknown transformation: {name}")
+        params_hash = transform_hash(int(cfg.seed), name, params)
+        augmenter = None
         for row in texts.itertuples(index=False):
-            rows.append(
-                {
-                    "pair_id": f"{row.text_id}-{name}",
+            pair_id = f"{row.text_id}-{name}"
+            pair = done.get(pair_id)
+            if (
+                pair is None
+                or pair["transform_hash"] != params_hash
+                or pair["original_text"] != row.text
+            ):
+                if augmenter is None:
+                    augmenter = build_augmenter(name, params)
+                random.seed(f"{cfg.seed}:{pair_id}")
+                pair = {
+                    "pair_id": pair_id,
                     "text_id": row.text_id,
                     "label": int(row.label),
                     "transformation": name,
                     "original_text": row.text,
                     "original_n_words": len(row.text.split()),
-                    **make_pair(row.text, augmenter),
+                    **PAIR_BUILDERS[name](row.text, augmenter),
+                    "transform_hash": params_hash,
                 }
-            )
+                done[pair_id] = pair
+                n_new += 1
+                if n_new % SAVE_EVERY == 0:
+                    write_pairs(list(done.values()), out_path)
+            rows.append(pair)
 
-    out_path = interim_dir / "pairs.parquet"
-    pd.DataFrame(rows, columns=PAIR_COLUMNS).to_parquet(out_path, index=False)
+    write_pairs(rows, out_path)
     return out_path

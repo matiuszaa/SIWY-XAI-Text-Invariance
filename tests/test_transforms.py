@@ -1,3 +1,5 @@
+import random
+
 import pandas as pd
 import pytest
 from omegaconf import OmegaConf
@@ -213,6 +215,56 @@ def test_transform_texts_runs_every_configured_transformation(texts_dir, monkeyp
 
     assert pairs.pair_id.tolist() == ["a-synonyms", "b-synonyms", "a-other", "b-other"]
     assert pairs.transformation.tolist() == ["synonyms", "synonyms", "other", "other"]
+
+
+class RandomAugmenter:
+    def augment(self, text):
+        return [f"{text} {random.random():.6f}"]
+
+
+def count_builds(monkeypatch):
+    builds = []
+
+    def build(name, params):
+        builds.append(name)
+        return RandomAugmenter()
+
+    monkeypatch.setattr(transforms, "build_augmenter", build)
+    monkeypatch.setitem(transforms.PAIR_BUILDERS, "noise", transforms.rewrite_pair)
+    return builds
+
+
+def test_transform_texts_reuses_cached_pairs(texts_dir, monkeypatch):
+    builds = count_builds(monkeypatch)
+    cfg = make_cfg(texts_dir, {"noise": {"level": 1}})
+
+    first = pd.read_parquet(transforms.transform_texts(cfg))
+    second = pd.read_parquet(transforms.transform_texts(cfg))
+
+    assert builds == ["noise"]
+    pd.testing.assert_frame_equal(first, second)
+
+
+def test_transform_texts_recomputes_after_config_change(texts_dir, monkeypatch):
+    builds = count_builds(monkeypatch)
+    transforms.transform_texts(make_cfg(texts_dir, {"noise": {"level": 1}}))
+    pairs = pd.read_parquet(
+        transforms.transform_texts(make_cfg(texts_dir, {"noise": {"level": 2}}))
+    )
+
+    assert builds == ["noise", "noise"]
+    assert pairs.transform_hash.nunique() == 1
+
+
+def test_transform_texts_resumed_run_matches_fresh_run(texts_dir, monkeypatch):
+    count_builds(monkeypatch)
+    cfg = make_cfg(texts_dir, {"noise": {"level": 1}})
+    fresh = pd.read_parquet(transforms.transform_texts(cfg))
+    fresh.iloc[:1].to_parquet(texts_dir / "pairs.parquet", index=False)
+
+    resumed = pd.read_parquet(transforms.transform_texts(cfg))
+
+    pd.testing.assert_frame_equal(fresh, resumed)
 
 
 def test_transform_texts_rejects_unknown_transformation(texts_dir):
