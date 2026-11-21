@@ -11,7 +11,7 @@ atrybucje per słowo i porównuje je między oryginałem a transformacją.
 
 ## Instalacja
 
-Wymaga [uv] i Pythona 3.11.
+Wymaga [uv] i Pythona 3.11
 
 ```bash
 make install
