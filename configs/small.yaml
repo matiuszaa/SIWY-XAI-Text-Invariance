@@ -39,6 +39,9 @@ transforms:
 filter:
   min_length_ratio: 0.7
   max_length_ratio: 1.3
+  sbert_model: sentence-transformers/all-mpnet-base-v2
+  min_similarity: 0.85
+  device: cuda
 
 explainers:
   ig:

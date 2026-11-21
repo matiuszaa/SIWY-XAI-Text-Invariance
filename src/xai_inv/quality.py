@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from omegaconf import DictConfig
+from sentence_transformers import SentenceTransformer
 
 from xai_inv.detector import Detector
 
@@ -12,6 +13,7 @@ FILTER_COLUMNS = [
     "original_p_chatgpt",
     "transformed_p_chatgpt",
     "length_ratio",
+    "semantic_similarity",
     "filter_status",
     "filter_reason",
 ]
@@ -19,6 +21,15 @@ FILTER_COLUMNS = [
 
 def length_ratio(original: str, transformed: str) -> float:
     return len(transformed.split()) / len(original.split())
+
+
+def semantic_similarity(
+    originals: list[str], transformed: list[str], model_name: str, device: str
+) -> np.ndarray:
+    model = SentenceTransformer(model_name, device=device)
+    a = model.encode(originals, convert_to_tensor=True, normalize_embeddings=True)
+    b = model.encode(transformed, convert_to_tensor=True, normalize_embeddings=True)
+    return (a * b).sum(dim=-1).cpu().numpy()
 
 
 def apply_filters(cfg: DictConfig) -> Path:
@@ -40,6 +51,9 @@ def apply_filters(cfg: DictConfig) -> Path:
     max_ratio = float(cfg.filter.max_length_ratio)
     if not 0 < min_ratio <= 1 <= max_ratio:
         raise ValueError(f"Invalid length ratio range: [{min_ratio}, {max_ratio}]")
+    min_similarity = float(cfg.filter.min_similarity)
+    if not -1 <= min_similarity <= 1:
+        raise ValueError(f"filter.min_similarity must be in [-1, 1], got {min_similarity}")
 
     result = pairs.copy()
     for column in FILTER_COLUMNS:
@@ -48,6 +62,7 @@ def apply_filters(cfg: DictConfig) -> Path:
     valid = result.transformation_status.eq("ok") & result.transformed_text.notna()
     decision_changed = pd.Series(False, index=result.index)
     ratios = pd.Series(np.nan, index=result.index)
+    similarities = pd.Series(np.nan, index=result.index)
     if valid.any():
         originals = result.loc[valid, "original_text"].tolist()
         transformed_texts = result.loc[valid, "transformed_text"].tolist()
@@ -63,11 +78,16 @@ def apply_filters(cfg: DictConfig) -> Path:
         ratios[valid] = [
             length_ratio(o, t) for o, t in zip(originals, transformed_texts, strict=True)
         ]
+        similarities[valid] = semantic_similarity(
+            originals, transformed_texts, cfg.filter.sbert_model, cfg.filter.device
+        )
 
     result["length_ratio"] = ratios
+    result["semantic_similarity"] = similarities
     checks = [
         ("transformation_rejected", ~valid),
         ("length_ratio_out_of_range", valid & ~ratios.between(min_ratio, max_ratio)),
+        ("low_semantic_similarity", valid & (similarities < min_similarity)),
         ("detector_decision_changed", valid & decision_changed),
     ]
     result["filter_status"] = "accepted"
