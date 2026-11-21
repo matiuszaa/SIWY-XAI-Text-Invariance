@@ -122,7 +122,16 @@ def synonym_pair(text: str, augmenter: Augmenter) -> dict[str, object]:
     }
 
 
-def transform_synonyms(cfg: DictConfig) -> Path:
+PAIR_BUILDERS = {"synonyms": synonym_pair}
+
+
+def build_augmenter(name: str, params: DictConfig) -> Augmenter:
+    if name == "synonyms":
+        return build_synonym_augmenter(float(params.fraction))
+    raise ValueError(f"Unknown transformation: {name}")
+
+
+def transform_texts(cfg: DictConfig) -> Path:
     interim_dir = Path(cfg.paths.interim)
     texts_path = interim_dir / "texts.parquet"
     if not texts_path.is_file():
@@ -135,24 +144,24 @@ def transform_synonyms(cfg: DictConfig) -> Path:
         missing = ", ".join(sorted(missing_columns))
         raise ValueError(f"Prepared texts missing required columns: {missing}")
 
-    random.seed(int(cfg.seed))
-    np.random.seed(int(cfg.seed))
-    augmenter = build_synonym_augmenter(float(cfg.transforms.synonyms.fraction))
-
     rows = []
-    for row in texts.itertuples(index=False):
-        pair = synonym_pair(row.text, augmenter)
-        rows.append(
-            {
-                "pair_id": f"{row.text_id}-synonyms",
-                "text_id": row.text_id,
-                "label": int(row.label),
-                "transformation": "synonyms",
-                "original_text": row.text,
-                "original_n_words": len(row.text.split()),
-                **pair,
-            }
-        )
+    for name, params in cfg.transforms.items():
+        random.seed(int(cfg.seed))
+        np.random.seed(int(cfg.seed))
+        augmenter = build_augmenter(name, params)
+        make_pair = PAIR_BUILDERS[name]
+        for row in texts.itertuples(index=False):
+            rows.append(
+                {
+                    "pair_id": f"{row.text_id}-{name}",
+                    "text_id": row.text_id,
+                    "label": int(row.label),
+                    "transformation": name,
+                    "original_text": row.text,
+                    "original_n_words": len(row.text.split()),
+                    **make_pair(row.text, augmenter),
+                }
+            )
 
     out_path = interim_dir / "pairs.parquet"
     pd.DataFrame(rows, columns=PAIR_COLUMNS).to_parquet(out_path, index=False)

@@ -50,27 +50,48 @@ def test_synonym_pair_rejects_unsafe_results(result, reason):
     assert pair["word_alignment"] is None
 
 
-def test_transform_synonyms_writes_pairs(tmp_path, monkeypatch):
+@pytest.fixture
+def texts_dir(tmp_path):
     pd.DataFrame(
         {"text_id": ["a", "b"], "label": [0, 1], "text": ["A small cat.", "A calm dog."]}
     ).to_parquet(tmp_path / "texts.parquet", index=False)
-    cfg = OmegaConf.create(
-        {
-            "seed": 42,
-            "paths": {"interim": str(tmp_path)},
-            "transforms": {"synonyms": {"fraction": 0.1}},
-        }
+    return tmp_path
+
+
+def make_cfg(path, transforms_cfg):
+    return OmegaConf.create(
+        {"seed": 42, "paths": {"interim": str(path)}, "transforms": transforms_cfg}
     )
+
+
+def test_transform_texts_writes_pairs(texts_dir, monkeypatch):
+    cfg = make_cfg(texts_dir, {"synonyms": {"fraction": 0.1}})
     monkeypatch.setattr(
         transforms,
         "build_synonym_augmenter",
         lambda fraction: FakeAugmenter(["A little cat."]),
     )
 
-    out_path = transforms.transform_synonyms(cfg)
+    out_path = transforms.transform_texts(cfg)
     pairs = pd.read_parquet(out_path)
 
-    assert out_path == tmp_path / "pairs.parquet"
+    assert out_path == texts_dir / "pairs.parquet"
     assert pairs.pair_id.tolist() == ["a-synonyms", "b-synonyms"]
     assert pairs.transformation_status.tolist() == ["ok", "ok"]
     assert [alignment.tolist() for alignment in pairs.word_alignment] == [[0, 1, 2], [0, 1, 2]]
+
+
+def test_transform_texts_runs_every_configured_transformation(texts_dir, monkeypatch):
+    cfg = make_cfg(texts_dir, {"synonyms": {"fraction": 0.1}, "other": {}})
+    monkeypatch.setattr(transforms, "build_augmenter", lambda name, params: FakeAugmenter([]))
+    monkeypatch.setitem(transforms.PAIR_BUILDERS, "other", transforms.synonym_pair)
+
+    pairs = pd.read_parquet(transforms.transform_texts(cfg))
+
+    assert pairs.pair_id.tolist() == ["a-synonyms", "b-synonyms", "a-other", "b-other"]
+    assert pairs.transformation.tolist() == ["synonyms", "synonyms", "other", "other"]
+
+
+def test_transform_texts_rejects_unknown_transformation(texts_dir):
+    with pytest.raises(ValueError, match="Unknown transformation"):
+        transforms.transform_texts(make_cfg(texts_dir, {"typos": {}}))
