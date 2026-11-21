@@ -9,7 +9,7 @@ from xai_inv.explanations import explain_texts
 from xai_inv.metrics import compute_metrics
 from xai_inv.quality import apply_filters
 from xai_inv.report import create_report
-from xai_inv.review import export_review_sample
+from xai_inv.review import export_review_sample, summarize_review
 from xai_inv.transforms import transform_texts
 
 app = typer.Typer(help="XAI explanation invariance under meaning-preserving text transformations.")
@@ -56,6 +56,13 @@ def review(
     cfg = load_config(config)
     out_path = export_review_sample(cfg, force=force)
     typer.echo(f"[{cfg.name}] pairs for manual review written to {out_path}")
+
+
+@app.command(name="review-summary")
+def review_summary(config: ConfigOption = DEFAULT_CONFIG) -> None:
+    cfg = load_config(config)
+    out_path = summarize_review(cfg)
+    typer.echo(f"[{cfg.name}] review summary written to {out_path}")
 
 
 @app.command()
