@@ -43,6 +43,9 @@ filter:
   min_similarity: 0.85
   device: cpu
 
+review:
+  n_pairs: 30
+
 explainers:
   ig:
     n_steps: 5

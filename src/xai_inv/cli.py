@@ -9,6 +9,7 @@ from xai_inv.explanations import explain_texts
 from xai_inv.metrics import compute_metrics
 from xai_inv.quality import apply_filters
 from xai_inv.report import create_report
+from xai_inv.review import export_review_sample
 from xai_inv.transforms import transform_texts
 
 app = typer.Typer(help="XAI explanation invariance under meaning-preserving text transformations.")
@@ -45,6 +46,16 @@ def filter_pairs(config: ConfigOption = DEFAULT_CONFIG) -> None:
     cfg = load_config(config)
     out_path = apply_filters(cfg)
     typer.echo(f"[{cfg.name}] filtered pairs written to {out_path}")
+
+
+@app.command()
+def review(
+    config: ConfigOption = DEFAULT_CONFIG,
+    force: Annotated[bool, typer.Option(help="Overwrite an existing review file.")] = False,
+) -> None:
+    cfg = load_config(config)
+    out_path = export_review_sample(cfg, force=force)
+    typer.echo(f"[{cfg.name}] pairs for manual review written to {out_path}")
 
 
 @app.command()
