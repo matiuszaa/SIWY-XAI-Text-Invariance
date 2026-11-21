@@ -22,9 +22,19 @@ transforms:
   backtranslation:
     forward_model: Helsinki-NLP/opus-mt-en-de
     backward_model: Helsinki-NLP/opus-mt-de-en
-    num_beams: 4
     batch_size: 16
     device: cuda
+    generate:
+      num_beams: 4
+  paraphrase:
+    model: humarin/chatgpt_paraphraser_on_T5_base
+    prefix: "paraphrase: "
+    batch_size: 16
+    device: cuda
+    generate:
+      num_beams: 5
+      repetition_penalty: 10.0
+      no_repeat_ngram_size: 2
 
 explainers:
   ig:

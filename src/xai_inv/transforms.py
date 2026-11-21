@@ -7,7 +7,7 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 WORD_TOKEN = re.compile(r"^([^A-Za-z]*)([A-Za-z]+)([^A-Za-z]*)$")
@@ -93,9 +93,17 @@ def rewrite_sentences(text: str, rewrite: Callable[[list[str]], list[str]]) -> s
 
 
 class Seq2SeqGenerator:
-    def __init__(self, model_name: str, device: str = "cpu", batch_size: int = 16, **generate):
+    def __init__(
+        self,
+        model_name: str,
+        device: str = "cpu",
+        batch_size: int = 16,
+        prefix: str = "",
+        **generate,
+    ):
         self.device = torch.device(device)
         self.batch_size = batch_size
+        self.prefix = prefix
         self.generate = generate
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
@@ -106,7 +114,7 @@ class Seq2SeqGenerator:
         outputs = []
         for start in range(0, len(texts), self.batch_size):
             batch = self.tokenizer(
-                texts[start : start + self.batch_size],
+                [self.prefix + text for text in texts[start : start + self.batch_size]],
                 padding=True,
                 truncation=True,
                 return_tensors="pt",
@@ -128,6 +136,14 @@ class BackTranslationAugmenter:
 
     def augment(self, text: str) -> list[str]:
         return [rewrite_sentences(text, lambda sentences: self.backward(self.forward(sentences)))]
+
+
+class ParaphraseAugmenter:
+    def __init__(self, paraphrase: Callable[[list[str]], list[str]]):
+        self.paraphrase = paraphrase
+
+    def augment(self, text: str) -> list[str]:
+        return [rewrite_sentences(text, self.paraphrase)]
 
 
 PAIR_COLUMNS = [
@@ -205,16 +221,21 @@ def rewrite_pair(text: str, augmenter: Augmenter) -> dict[str, object]:
     }
 
 
-PAIR_BUILDERS = {"synonyms": synonym_pair, "backtranslation": rewrite_pair}
+PAIR_BUILDERS = {
+    "synonyms": synonym_pair,
+    "backtranslation": rewrite_pair,
+    "paraphrase": rewrite_pair,
+}
 
 
-def build_generator(model_name: str, params: DictConfig) -> Seq2SeqGenerator:
+def build_generator(model_name: str, params: DictConfig, prefix: str = "") -> Seq2SeqGenerator:
+    generate = {"max_new_tokens": MAX_NEW_TOKENS, **OmegaConf.to_container(params.generate)}
     return Seq2SeqGenerator(
         model_name,
         device=params.device,
         batch_size=int(params.batch_size),
-        num_beams=int(params.num_beams),
-        max_new_tokens=MAX_NEW_TOKENS,
+        prefix=prefix,
+        **generate,
     )
 
 
@@ -226,6 +247,8 @@ def build_augmenter(name: str, params: DictConfig) -> Augmenter:
             build_generator(params.forward_model, params),
             build_generator(params.backward_model, params),
         )
+    if name == "paraphrase":
+        return ParaphraseAugmenter(build_generator(params.model, params, prefix=params.prefix))
     raise ValueError(f"Unknown transformation: {name}")
 
 

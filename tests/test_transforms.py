@@ -103,7 +103,13 @@ def test_rewrite_pair_rejects_empty_and_unchanged(result, reason):
     assert pair["transformation_reason"] == reason
 
 
-def test_build_augmenter_back_translation(monkeypatch):
+def test_paraphrase_rewrites_every_sentence():
+    augmenter = transforms.ParaphraseAugmenter(lambda sentences: [f"<{s}>" for s in sentences])
+    assert augmenter.augment("One. Two.\n\nThree.") == ["<One.> <Two.>\n\n<Three.>"]
+
+
+@pytest.fixture
+def created_generators(monkeypatch):
     created = []
 
     class FakeGenerator:
@@ -111,26 +117,60 @@ def test_build_augmenter_back_translation(monkeypatch):
             created.append((model_name, kwargs))
 
     monkeypatch.setattr(transforms, "Seq2SeqGenerator", FakeGenerator)
+    return created
+
+
+def test_build_augmenter_back_translation(created_generators):
     params = OmegaConf.create(
         {
             "forward_model": "en-de",
             "backward_model": "de-en",
-            "num_beams": 2,
             "batch_size": 4,
             "device": "cpu",
+            "generate": {"num_beams": 2},
         }
     )
 
     augmenter = transforms.build_augmenter("backtranslation", params)
 
     assert isinstance(augmenter, transforms.BackTranslationAugmenter)
-    assert [name for name, _ in created] == ["en-de", "de-en"]
-    assert created[0][1] == {
+    assert [name for name, _ in created_generators] == ["en-de", "de-en"]
+    assert created_generators[0][1] == {
         "device": "cpu",
         "batch_size": 4,
+        "prefix": "",
         "num_beams": 2,
         "max_new_tokens": transforms.MAX_NEW_TOKENS,
     }
+
+
+def test_build_augmenter_paraphrase(created_generators):
+    params = OmegaConf.create(
+        {
+            "model": "t5",
+            "prefix": "paraphrase: ",
+            "batch_size": 8,
+            "device": "cpu",
+            "generate": {"num_beams": 5, "no_repeat_ngram_size": 2, "max_new_tokens": 64},
+        }
+    )
+
+    augmenter = transforms.build_augmenter("paraphrase", params)
+
+    assert isinstance(augmenter, transforms.ParaphraseAugmenter)
+    assert created_generators == [
+        (
+            "t5",
+            {
+                "device": "cpu",
+                "batch_size": 8,
+                "prefix": "paraphrase: ",
+                "num_beams": 5,
+                "no_repeat_ngram_size": 2,
+                "max_new_tokens": 64,
+            },
+        )
+    ]
 
 
 @pytest.fixture
