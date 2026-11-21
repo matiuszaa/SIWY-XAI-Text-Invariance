@@ -93,6 +93,8 @@ def compute_metrics(cfg: DictConfig) -> Path:
     fraction = float(cfg.metrics.top_k_fraction)
     rows = []
     for pair in pairs[pairs.filter_status.eq("accepted")].itertuples(index=False):
+        if pair.word_alignment is None:
+            continue
         pair_explanations = explanations[explanations.pair_id.eq(pair.pair_id)]
         by_version = pair_explanations.set_index("version")
         if set(by_version.index) != {"original", "transformed"} or by_version.index.has_duplicates:

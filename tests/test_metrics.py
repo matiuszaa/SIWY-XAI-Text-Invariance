@@ -27,11 +27,11 @@ def test_identical_attributions_have_perfect_metrics():
 def test_compute_metrics_writes_one_row_per_accepted_pair(tmp_path):
     pd.DataFrame(
         {
-            "pair_id": ["accepted", "rejected"],
-            "text_id": ["a", "b"],
-            "transformation": ["synonyms", "synonyms"],
-            "word_alignment": [[0, 1, 2], [0, 1]],
-            "filter_status": ["accepted", "rejected"],
+            "pair_id": ["accepted", "rejected", "unaligned"],
+            "text_id": ["a", "b", "a"],
+            "transformation": ["synonyms", "synonyms", "backtranslation"],
+            "word_alignment": [[0, 1, 2], [0, 1], None],
+            "filter_status": ["accepted", "rejected", "accepted"],
         }
     ).to_parquet(tmp_path / "filtered_pairs.parquet", index=False)
     pd.DataFrame(

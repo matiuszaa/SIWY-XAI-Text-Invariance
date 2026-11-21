@@ -19,6 +19,12 @@ detector:
 transforms:
   synonyms:
     fraction: 0.1
+  backtranslation:
+    forward_model: Helsinki-NLP/opus-mt-en-de
+    backward_model: Helsinki-NLP/opus-mt-de-en
+    num_beams: 4
+    batch_size: 16
+    device: cuda
 
 explainers:
   ig:

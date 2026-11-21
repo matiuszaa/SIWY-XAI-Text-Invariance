@@ -50,6 +50,89 @@ def test_synonym_pair_rejects_unsafe_results(result, reason):
     assert pair["word_alignment"] is None
 
 
+def test_rewrite_sentences_keeps_paragraphs():
+    text = "First one. Second one.\n\nThird\n one."
+    assert transforms.split_sentences(text) == [["First one.", "Second one."], ["Third one."]]
+    result = transforms.rewrite_sentences(text, lambda sentences: [s.upper() for s in sentences])
+    assert result == "FIRST ONE. SECOND ONE.\n\nTHIRD ONE."
+
+
+def test_rewrite_sentences_rejects_missing_output():
+    with pytest.raises(ValueError, match="rewritten sentences"):
+        transforms.rewrite_sentences("One. Two.", lambda sentences: sentences[:1])
+
+
+def test_back_translation_goes_through_pivot_and_back():
+    calls = []
+
+    def forward(sentences):
+        calls.append(("forward", sentences))
+        return [f"de:{s}" for s in sentences]
+
+    def backward(sentences):
+        calls.append(("backward", sentences))
+        return [s.removeprefix("de:").replace("cat", "kitten") for s in sentences]
+
+    augmenter = transforms.BackTranslationAugmenter(forward, backward)
+
+    assert augmenter.augment("A cat sleeps. It is warm.") == ["A kitten sleeps. It is warm."]
+    assert calls == [
+        ("forward", ["A cat sleeps.", "It is warm."]),
+        ("backward", ["de:A cat sleeps.", "de:It is warm."]),
+    ]
+
+
+def test_rewrite_pair_has_no_alignment_yet():
+    pair = transforms.rewrite_pair("A cat sleeps.", FakeAugmenter(["The cat is asleep."]))
+    assert pair == {
+        "transformed_text": "The cat is asleep.",
+        "transformed_n_words": 4,
+        "word_alignment": None,
+        "transformation_status": "ok",
+        "transformation_reason": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("result", "reason"),
+    [([], "no_candidate"), ([" "], "no_candidate"), (["A  cat sleeps. "], "unchanged")],
+)
+def test_rewrite_pair_rejects_empty_and_unchanged(result, reason):
+    pair = transforms.rewrite_pair("A cat sleeps.", FakeAugmenter(result))
+    assert pair["transformation_status"] == "rejected"
+    assert pair["transformation_reason"] == reason
+
+
+def test_build_augmenter_back_translation(monkeypatch):
+    created = []
+
+    class FakeGenerator:
+        def __init__(self, model_name, **kwargs):
+            created.append((model_name, kwargs))
+
+    monkeypatch.setattr(transforms, "Seq2SeqGenerator", FakeGenerator)
+    params = OmegaConf.create(
+        {
+            "forward_model": "en-de",
+            "backward_model": "de-en",
+            "num_beams": 2,
+            "batch_size": 4,
+            "device": "cpu",
+        }
+    )
+
+    augmenter = transforms.build_augmenter("backtranslation", params)
+
+    assert isinstance(augmenter, transforms.BackTranslationAugmenter)
+    assert [name for name, _ in created] == ["en-de", "de-en"]
+    assert created[0][1] == {
+        "device": "cpu",
+        "batch_size": 4,
+        "num_beams": 2,
+        "max_new_tokens": transforms.MAX_NEW_TOKENS,
+    }
+
+
 @pytest.fixture
 def texts_dir(tmp_path):
     pd.DataFrame(
