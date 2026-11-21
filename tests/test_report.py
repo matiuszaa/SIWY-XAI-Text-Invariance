@@ -12,7 +12,7 @@ def test_create_report_summarizes_filtering_and_metrics(tmp_path):
             "transformation_status": ["ok", "ok", "rejected"],
             "filter_status": ["accepted", "rejected", "rejected"],
             "filter_reason": [
-                "same_detector_decision",
+                "passed",
                 "detector_decision_changed",
                 "transformation_rejected",
             ],

@@ -7,7 +7,7 @@ from xai_inv import data
 from xai_inv.config import load_config
 from xai_inv.explanations import explain_texts
 from xai_inv.metrics import compute_metrics
-from xai_inv.quality import filter_by_detector
+from xai_inv.quality import apply_filters
 from xai_inv.report import create_report
 from xai_inv.transforms import transform_texts
 
@@ -43,7 +43,7 @@ def transform(config: ConfigOption = DEFAULT_CONFIG) -> None:
 @app.command(name="filter")
 def filter_pairs(config: ConfigOption = DEFAULT_CONFIG) -> None:
     cfg = load_config(config)
-    out_path = filter_by_detector(cfg)
+    out_path = apply_filters(cfg)
     typer.echo(f"[{cfg.name}] filtered pairs written to {out_path}")
 
 

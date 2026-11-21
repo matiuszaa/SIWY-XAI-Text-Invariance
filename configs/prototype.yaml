@@ -20,6 +20,10 @@ transforms:
   synonyms:
     fraction: 0.1
 
+filter:
+  min_length_ratio: 0.7
+  max_length_ratio: 1.3
+
 explainers:
   ig:
     n_steps: 50

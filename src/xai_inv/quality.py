@@ -1,21 +1,27 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from omegaconf import DictConfig
 
 from xai_inv.detector import Detector
 
-PREDICTION_COLUMNS = [
+FILTER_COLUMNS = [
     "original_predicted_label",
     "transformed_predicted_label",
     "original_p_chatgpt",
     "transformed_p_chatgpt",
+    "length_ratio",
     "filter_status",
     "filter_reason",
 ]
 
 
-def filter_by_detector(cfg: DictConfig) -> Path:
+def length_ratio(original: str, transformed: str) -> float:
+    return len(transformed.split()) / len(original.split())
+
+
+def apply_filters(cfg: DictConfig) -> Path:
     interim_dir = Path(cfg.paths.interim)
     pairs_path = interim_dir / "pairs.parquet"
     if not pairs_path.is_file():
@@ -30,33 +36,45 @@ def filter_by_detector(cfg: DictConfig) -> Path:
         missing = ", ".join(sorted(missing_columns))
         raise ValueError(f"Transformed pairs missing required columns: {missing}")
 
+    min_ratio = float(cfg.filter.min_length_ratio)
+    max_ratio = float(cfg.filter.max_length_ratio)
+    if not 0 < min_ratio <= 1 <= max_ratio:
+        raise ValueError(f"Invalid length ratio range: [{min_ratio}, {max_ratio}]")
+
     result = pairs.copy()
-    for column in PREDICTION_COLUMNS:
+    for column in FILTER_COLUMNS:
         result[column] = None
 
     valid = result.transformation_status.eq("ok") & result.transformed_text.notna()
+    decision_changed = pd.Series(False, index=result.index)
+    ratios = pd.Series(np.nan, index=result.index)
     if valid.any():
+        originals = result.loc[valid, "original_text"].tolist()
+        transformed_texts = result.loc[valid, "transformed_text"].tolist()
         detector = Detector(cfg.detector.model, device=cfg.detector.device)
-        original = detector.predict(result.loc[valid, "original_text"].tolist())
-        transformed = detector.predict(result.loc[valid, "transformed_text"].tolist())
+        original = detector.predict(originals)
+        transformed = detector.predict(transformed_texts)
 
         result.loc[valid, "original_predicted_label"] = original.labels.astype(int)
         result.loc[valid, "transformed_predicted_label"] = transformed.labels.astype(int)
         result.loc[valid, "original_p_chatgpt"] = original.probs.astype(float)
         result.loc[valid, "transformed_p_chatgpt"] = transformed.probs.astype(float)
+        decision_changed[valid] = original.labels != transformed.labels
+        ratios[valid] = [
+            length_ratio(o, t) for o, t in zip(originals, transformed_texts, strict=True)
+        ]
 
-        same_decision = original.labels == transformed.labels
-        valid_indices = result.index[valid]
-        accepted_indices = valid_indices[same_decision]
-        rejected_indices = valid_indices[~same_decision]
-        result.loc[accepted_indices, "filter_status"] = "accepted"
-        result.loc[accepted_indices, "filter_reason"] = "same_detector_decision"
-        result.loc[rejected_indices, "filter_status"] = "rejected"
-        result.loc[rejected_indices, "filter_reason"] = "detector_decision_changed"
-
-    invalid = ~valid
-    result.loc[invalid, "filter_status"] = "rejected"
-    result.loc[invalid, "filter_reason"] = "transformation_rejected"
+    result["length_ratio"] = ratios
+    checks = [
+        ("transformation_rejected", ~valid),
+        ("length_ratio_out_of_range", valid & ~ratios.between(min_ratio, max_ratio)),
+        ("detector_decision_changed", valid & decision_changed),
+    ]
+    result["filter_status"] = "accepted"
+    result["filter_reason"] = "passed"
+    for reason, failed in reversed(checks):
+        result.loc[failed, "filter_status"] = "rejected"
+        result.loc[failed, "filter_reason"] = reason
 
     out_path = interim_dir / "filtered_pairs.parquet"
     result.to_parquet(out_path, index=False)
