@@ -65,3 +65,7 @@ alignment:
 
 metrics:
   top_k_fraction: 0.1
+
+wandb:
+  project: siwy-xai-text-invariance
+  mode: disabled

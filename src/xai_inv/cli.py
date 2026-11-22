@@ -11,6 +11,7 @@ from xai_inv.metrics import compute_metrics
 from xai_inv.quality import apply_filters
 from xai_inv.report import create_report
 from xai_inv.review import export_review_sample, summarize_review
+from xai_inv.tracking import log_results
 from xai_inv.transforms import transform_texts
 
 app = typer.Typer(help="XAI explanation invariance under meaning-preserving text transformations.")
@@ -87,6 +88,8 @@ def report(config: ConfigOption = DEFAULT_CONFIG) -> None:
     cfg = load_config(config)
     out_path = create_report(cfg)
     typer.echo(f"[{cfg.name}] report written to {out_path}")
+    if log_results(cfg):
+        typer.echo(f"[{cfg.name}] results logged to W&B project {cfg.wandb.project}")
 
 
 @app.command()
