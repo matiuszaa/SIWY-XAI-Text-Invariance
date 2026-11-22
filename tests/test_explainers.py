@@ -74,3 +74,13 @@ def test_explain_ig_word_level(detector):
     assert np.isfinite(att.nonword_score)
     no_newline = explain_ig(detector, text.replace("\n\n", " "), target=1, n_steps=5)
     assert no_newline.nonword_score == 0.0
+
+
+def test_explain_lime_word_level_and_seeded(detector):
+    text = "When something is decriminalized , it wo n't go on your record."
+    n_samples = SMOKE.explainers.lime.n_samples
+    att = explainers.explain_lime(detector, text, target=1, n_samples=n_samples, seed=1)
+    same = explainers.explain_lime(detector, text, target=1, n_samples=n_samples, seed=1)
+    assert att.words == text.split()
+    assert np.isfinite(att.scores).all()
+    np.testing.assert_allclose(att.scores, same.scores)

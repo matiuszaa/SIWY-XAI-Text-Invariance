@@ -50,6 +50,9 @@ review:
 explainers:
   ig:
     n_steps: 5
+  lime:
+    n_samples: 50
+    seed: 42
 
 alignment:
   model: google-bert/bert-base-multilingual-cased

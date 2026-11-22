@@ -1,7 +1,7 @@
 from typing import NamedTuple
 
 import numpy as np
-from ferret import IntegratedGradientExplainer
+from ferret import IntegratedGradientExplainer, LIMEExplainer
 
 from xai_inv.detector import Detector
 
@@ -48,7 +48,7 @@ def aggregate_to_words(text: str, offsets, token_scores) -> WordAttribution:
     return WordAttribution(words, scores, nonword)
 
 
-EXPLAINERS = {"ig": IntegratedGradientExplainer}
+EXPLAINERS = {"ig": IntegratedGradientExplainer, "lime": LIMEExplainer}
 
 
 def explain(
@@ -66,3 +66,16 @@ def explain(
 
 def explain_ig(detector: Detector, text: str, target: int, n_steps: int = 50) -> WordAttribution:
     return explain(detector, "ig", text, target, call_args={"n_steps": n_steps})
+
+
+def explain_lime(
+    detector: Detector, text: str, target: int, n_samples: int = 1000, seed: int = 42
+) -> WordAttribution:
+    return explain(
+        detector,
+        "lime",
+        text,
+        target,
+        init_args={"random_state": seed},
+        call_args={"num_samples": n_samples, "batch_size": detector.batch_size},
+    )
