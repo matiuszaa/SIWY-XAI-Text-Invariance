@@ -3,6 +3,15 @@ from pathlib import Path
 import pandas as pd
 from omegaconf import DictConfig
 
+from xai_inv.explanations import timing_summary
+
+REJECTION_REASONS = {
+    "transformation_rejected": "Transformation rejected",
+    "length_ratio_out_of_range": "Length ratio",
+    "low_semantic_similarity": "SBERT",
+    "detector_decision_changed": "Decision changed",
+}
+
 
 def _number(value: float) -> str:
     return "—" if pd.isna(value) else f"{value:.3f}"
@@ -38,6 +47,8 @@ def create_report(cfg: DictConfig) -> Path:
     required_pair_columns = {
         "pair_id",
         "text_id",
+        "label",
+        "transformation",
         "transformation_status",
         "filter_status",
         "filter_reason",
@@ -48,7 +59,15 @@ def create_report(cfg: DictConfig) -> Path:
         "original_p_chatgpt",
         "transformed_p_chatgpt",
     }
-    required_metric_columns = {"pair_id", "text_id", "transformation", "spearman", "top_k_jaccard"}
+    required_metric_columns = {
+        "pair_id",
+        "text_id",
+        "transformation",
+        "method",
+        "alignment_coverage",
+        "spearman",
+        "top_k_jaccard",
+    }
     required_text_columns = {"text_id", "source", "question"}
     missing_pairs = required_pair_columns - set(pairs.columns)
     missing_metrics = required_metric_columns - set(metrics.columns)
@@ -69,9 +88,11 @@ def create_report(cfg: DictConfig) -> Path:
     accepted_pairs = int(pairs.filter_status.eq("accepted").sum())
     detector_rejections = int(pairs.filter_reason.eq("detector_decision_changed").sum())
     valid_pairs = pairs[pairs.transformation_status.eq("ok")].copy()
-    word_changes = valid_pairs.apply(
-        lambda row: _changed_words(row.original_text, row.transformed_text), axis=1
-    )
+    synonym_pairs = valid_pairs[valid_pairs.transformation.eq("synonyms")]
+    word_changes = [
+        _changed_words(row.original_text, row.transformed_text)
+        for row in synonym_pairs.itertuples(index=False)
+    ]
     changed_words = sum(change[0] for change in word_changes)
     total_words = sum(change[1] for change in word_changes)
     replacement_rates = [changed / total for changed, total in word_changes if total > 0]
@@ -100,16 +121,34 @@ def create_report(cfg: DictConfig) -> Path:
         "",
         "| Measure | Value |",
         "|---|---:|",
-        f"| Input texts | {total_pairs} |",
+        f"| Input pairs | {total_pairs} |",
         f"| Valid transformations | {transformed_pairs} |",
-        f"| Accepted detector-stable pairs | {accepted_pairs} |",
+        f"| Accepted pairs | {accepted_pairs} |",
         f"| Rejected after detector decision change | {detector_rejections} |",
+        "",
+        "| Transformation | Pairs | Accepted | Accepted human | Accepted ChatGPT | "
+        + " | ".join(REJECTION_REASONS.values())
+        + " |",
+        "|---|" + "---:|" * (4 + len(REJECTION_REASONS)),
+    ]
+    for transformation, group in pairs.groupby("transformation", sort=True):
+        accepted = group[group.filter_status.eq("accepted")]
+        rejections = " | ".join(
+            str(int(group.filter_reason.eq(reason).sum())) for reason in REJECTION_REASONS
+        )
+        lines.append(
+            f"| {transformation} | {len(group)} | {len(accepted)} | "
+            f"{int(accepted.label.eq(0).sum())} | {int(accepted.label.eq(1).sum())} | "
+            f"{rejections} |"
+        )
+
+    lines += [
         "",
         "## Transformation impact",
         "",
         "| Measure | Value |",
         "|---|---:|",
-        f"| Changed words | {changed_words} / {total_words} |",
+        f"| Changed words (synonyms) | {changed_words} / {total_words} |",
         f"| Changed-word rate | {_number(changed_word_rate)} |",
         f"| Median pair-level changed-word rate | {_number(median_replacement_rate)} |",
         f"| Mean absolute change in p_chatgpt | {_number(confidence_changes.mean())} |",
@@ -126,19 +165,37 @@ def create_report(cfg: DictConfig) -> Path:
         "",
         "## Invariance metrics",
         "",
-        "| Transformation | Pairs | Spearman mean | Spearman median | "
-        "Top-k Jaccard mean | Top-k Jaccard median |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Transformation | Method | Pairs | Alignment coverage | Spearman mean | "
+        "Spearman median | Top-k Jaccard mean | Top-k Jaccard median |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     if metrics.empty:
-        lines.append("| — | 0 | — | — | — | — |")
+        lines.append("| — | — | 0 | — | — | — | — | — |")
     else:
-        for transformation, group in metrics.groupby("transformation", sort=True):
+        for (transformation, method), group in metrics.groupby(
+            ["transformation", "method"], sort=True
+        ):
             lines.append(
-                "| "
-                f"{transformation} | {len(group)} | {_number(group.spearman.mean())} | "
+                f"| {transformation} | {method} | {len(group)} | "
+                f"{_number(group.alignment_coverage.mean())} | {_number(group.spearman.mean())} | "
                 f"{_number(group.spearman.median())} | {_number(group.top_k_jaccard.mean())} | "
                 f"{_number(group.top_k_jaccard.median())} |"
+            )
+
+    explanations_path = interim_dir / "explanations.parquet"
+    if explanations_path.is_file():
+        timing = timing_summary(pd.read_parquet(explanations_path))
+        lines += [
+            "",
+            "## Explanation time",
+            "",
+            "| Method | Device | Explanations | Mean [s] | Median [s] | Total [s] |",
+            "|---|---|---:|---:|---:|---:|",
+        ]
+        for row in timing.itertuples(index=False):
+            lines.append(
+                f"| {row.method} | {row.device} | {row.count} | {_number(row.mean)} | "
+                f"{_number(row.median)} | {_number(row.sum)} |"
             )
 
     lines.extend(
@@ -146,20 +203,20 @@ def create_report(cfg: DictConfig) -> Path:
             "",
             "## Least stable explanation pairs",
             "",
-            "| Pair ID | Spearman | Top-k Jaccard | Absolute change in p_chatgpt |",
-            "|---|---:|---:|---:|",
+            "| Pair ID | Method | Spearman | Top-k Jaccard | Absolute change in p_chatgpt |",
+            "|---|---|---:|---:|---:|",
         ]
     )
     if metrics_with_confidence.empty:
-        lines.append("| — | — | — | — |")
+        lines.append("| — | — | — | — | — |")
     else:
         least_stable = metrics_with_confidence.nsmallest(3, "spearman")
         for row in least_stable.itertuples(index=False):
             lines.append(
-                f"| {row.pair_id} | {_number(row.spearman)} | {_number(row.top_k_jaccard)} | "
-                f"{_number(row.abs_p_chatgpt_change)} |"
+                f"| {row.pair_id} | {row.method} | {_number(row.spearman)} | "
+                f"{_number(row.top_k_jaccard)} | {_number(row.abs_p_chatgpt_change)} |"
             )
-        for row in least_stable.itertuples(index=False):
+        for row in least_stable.drop_duplicates("pair_id").itertuples(index=False):
             lines.extend(
                 [
                     "",
