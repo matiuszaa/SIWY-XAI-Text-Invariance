@@ -51,5 +51,10 @@ explainers:
   ig:
     n_steps: 5
 
+alignment:
+  model: google-bert/bert-base-multilingual-cased
+  method: itermax
+  device: cpu
+
 metrics:
   top_k_fraction: 0.1

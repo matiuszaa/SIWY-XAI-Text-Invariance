@@ -35,6 +35,11 @@ explainers:
   ig:
     n_steps: 50
 
+alignment:
+  model: google-bert/bert-base-multilingual-cased
+  method: itermax
+  device: cuda
+
 metrics:
   top_k_fraction: 0.1
 

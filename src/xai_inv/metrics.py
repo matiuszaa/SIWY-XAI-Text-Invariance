@@ -6,10 +6,14 @@ import pandas as pd
 from omegaconf import DictConfig
 from scipy.stats import spearmanr
 
+from xai_inv.alignment import WordAligner, alignment_coverage
+
 METRIC_COLUMNS = [
     "pair_id",
     "text_id",
     "transformation",
+    "word_alignment",
+    "alignment_coverage",
     "n_aligned_words",
     "spearman",
     "top_k",
@@ -17,23 +21,27 @@ METRIC_COLUMNS = [
 ]
 
 
+def as_targets(word_alignment) -> list[list[int]]:
+    return [[int(t) for t in np.atleast_1d(targets)] for targets in word_alignment]
+
+
 def align_attributions(
     original_scores: list[float] | np.ndarray,
     transformed_scores: list[float] | np.ndarray,
-    word_alignment: list[int] | np.ndarray,
+    word_alignment: list[list[int]],
 ) -> tuple[np.ndarray, np.ndarray]:
     original = np.asarray(original_scores, dtype=float)
     transformed = np.asarray(transformed_scores, dtype=float)
-    alignment = np.asarray(word_alignment, dtype=int)
     if original.ndim != transformed.ndim or original.ndim != 1:
         raise ValueError("Attribution scores must be one-dimensional")
-    if len(original) != len(alignment):
+    if len(original) != len(word_alignment):
         raise ValueError("Word alignment must contain one entry for every original word")
-    if len(alignment) == 0:
-        return original, transformed[:0]
-    if (alignment < 0).any() or (alignment >= len(transformed)).any():
-        raise ValueError("Word alignment contains an out-of-range transformed-word index")
-    return original, transformed[alignment]
+    aligned = [i for i, targets in enumerate(word_alignment) if len(targets) > 0]
+    for i in aligned:
+        if min(word_alignment[i]) < 0 or max(word_alignment[i]) >= len(transformed):
+            raise ValueError("Word alignment contains an out-of-range transformed-word index")
+    summed = [transformed[list(word_alignment[i])].sum() for i in aligned]
+    return original[aligned], np.asarray(summed, dtype=float)
 
 
 def spearman_similarity(original: np.ndarray, transformed: np.ndarray) -> float:
@@ -75,6 +83,8 @@ def compute_metrics(cfg: DictConfig) -> Path:
         "pair_id",
         "text_id",
         "transformation",
+        "original_text",
+        "transformed_text",
         "word_alignment",
         "filter_status",
     }
@@ -91,10 +101,17 @@ def compute_metrics(cfg: DictConfig) -> Path:
         )
 
     fraction = float(cfg.metrics.top_k_fraction)
+    aligner = None
     rows = []
     for pair in pairs[pairs.filter_status.eq("accepted")].itertuples(index=False):
         if pair.word_alignment is None:
-            continue
+            if aligner is None:
+                aligner = WordAligner(
+                    cfg.alignment.model, method=cfg.alignment.method, device=cfg.alignment.device
+                )
+            word_alignment = aligner.align(pair.original_text, pair.transformed_text)
+        else:
+            word_alignment = as_targets(pair.word_alignment)
         pair_explanations = explanations[explanations.pair_id.eq(pair.pair_id)]
         by_version = pair_explanations.set_index("version")
         if set(by_version.index) != {"original", "transformed"} or by_version.index.has_duplicates:
@@ -105,7 +122,7 @@ def compute_metrics(cfg: DictConfig) -> Path:
         original, transformed = align_attributions(
             by_version.loc["original", "ig_scores"],
             by_version.loc["transformed", "ig_scores"],
-            pair.word_alignment,
+            word_alignment,
         )
         k, jaccard = top_k_jaccard(original, transformed, fraction)
         rows.append(
@@ -113,6 +130,8 @@ def compute_metrics(cfg: DictConfig) -> Path:
                 "pair_id": pair.pair_id,
                 "text_id": pair.text_id,
                 "transformation": pair.transformation,
+                "word_alignment": word_alignment,
+                "alignment_coverage": alignment_coverage(word_alignment),
                 "n_aligned_words": len(original),
                 "spearman": spearman_similarity(original, transformed),
                 "top_k": k,

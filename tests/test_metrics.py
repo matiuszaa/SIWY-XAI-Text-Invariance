@@ -3,18 +3,36 @@ import pandas as pd
 import pytest
 from omegaconf import OmegaConf
 
-from xai_inv.metrics import align_attributions, compute_metrics, spearman_similarity, top_k_jaccard
+from xai_inv import metrics
+from xai_inv.metrics import (
+    align_attributions,
+    as_targets,
+    compute_metrics,
+    spearman_similarity,
+    top_k_jaccard,
+)
+
+
+def test_as_targets_accepts_identity_and_simalign_mappings():
+    assert as_targets(np.array([1, 0])) == [[1], [0]]
+    assert as_targets([np.array([0, 2]), np.array([], dtype=int)]) == [[0, 2], []]
 
 
 def test_align_attributions_uses_saved_word_mapping():
-    original, transformed = align_attributions([1.0, 2.0], [20.0, 10.0], [1, 0])
+    original, transformed = align_attributions([1.0, 2.0], [20.0, 10.0], [[1], [0]])
     np.testing.assert_allclose(original, [1.0, 2.0])
     np.testing.assert_allclose(transformed, [10.0, 20.0])
 
 
+def test_align_attributions_sums_targets_and_drops_unaligned_words():
+    original, transformed = align_attributions([1.0, 2.0, 3.0], [0.5, 0.25, 4.0], [[0, 1], [], [2]])
+    np.testing.assert_allclose(original, [1.0, 3.0])
+    np.testing.assert_allclose(transformed, [0.75, 4.0])
+
+
 def test_align_attributions_rejects_invalid_mapping():
     with pytest.raises(ValueError, match="out-of-range"):
-        align_attributions([1.0], [2.0], [1])
+        align_attributions([1.0], [2.0], [[1]])
 
 
 def test_identical_attributions_have_perfect_metrics():
@@ -24,33 +42,54 @@ def test_identical_attributions_have_perfect_metrics():
     assert (k, jaccard) == (2, 1.0)
 
 
-def test_compute_metrics_writes_one_row_per_accepted_pair(tmp_path):
+def test_compute_metrics_aligns_pairs_without_saved_mapping(tmp_path, monkeypatch):
     pd.DataFrame(
         {
             "pair_id": ["accepted", "rejected", "unaligned"],
             "text_id": ["a", "b", "a"],
             "transformation": ["synonyms", "synonyms", "backtranslation"],
+            "original_text": ["x y z", "x y", "x y z"],
+            "transformed_text": ["x y w", "x w", "z x"],
             "word_alignment": [[0, 1, 2], [0, 1], None],
             "filter_status": ["accepted", "rejected", "accepted"],
         }
     ).to_parquet(tmp_path / "filtered_pairs.parquet", index=False)
     pd.DataFrame(
         {
-            "pair_id": ["accepted", "accepted"],
-            "version": ["original", "transformed"],
-            "ig_scores": [[0.1, 0.9, -0.2], [0.1, 0.9, -0.2]],
+            "pair_id": ["accepted", "accepted", "unaligned", "unaligned"],
+            "version": ["original", "transformed", "original", "transformed"],
+            "ig_scores": [[0.1, 0.9, -0.2], [0.1, 0.9, -0.2], [0.1, 0.9, -0.2], [-0.2, 0.1]],
         }
     ).to_parquet(tmp_path / "explanations.parquet", index=False)
     cfg = OmegaConf.create(
-        {"paths": {"interim": str(tmp_path)}, "metrics": {"top_k_fraction": 0.5}}
+        {
+            "paths": {"interim": str(tmp_path)},
+            "metrics": {"top_k_fraction": 0.5},
+            "alignment": {"model": "mbert", "method": "itermax", "device": "cpu"},
+        }
     )
+
+    class FakeAligner:
+        def __init__(self, model, method, device):
+            assert (model, method, device) == ("mbert", "itermax", "cpu")
+
+        def align(self, original, transformed):
+            assert (original, transformed) == ("x y z", "z x")
+            return [[1], [], [0]]
+
+    monkeypatch.setattr(metrics, "WordAligner", FakeAligner)
 
     out_path = compute_metrics(cfg)
     result = pd.read_parquet(out_path)
 
     assert out_path == tmp_path / "metrics.parquet"
-    assert result.pair_id.tolist() == ["accepted"]
-    assert result.n_aligned_words.tolist() == [3]
-    assert result.spearman.tolist() == [1.0]
-    assert result.top_k.tolist() == [2]
-    assert result.top_k_jaccard.tolist() == [1.0]
+    assert result.pair_id.tolist() == ["accepted", "unaligned"]
+    assert [[t.tolist() for t in a] for a in result.word_alignment] == [
+        [[0], [1], [2]],
+        [[1], [], [0]],
+    ]
+    np.testing.assert_allclose(result.alignment_coverage, [1.0, 2 / 3])
+    assert result.n_aligned_words.tolist() == [3, 2]
+    np.testing.assert_allclose(result.spearman, [1.0, 1.0])
+    assert result.top_k.tolist() == [2, 1]
+    assert result.top_k_jaccard.tolist() == [1.0, 1.0]
