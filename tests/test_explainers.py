@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from xai_inv import explainers
 from xai_inv.config import load_config
 from xai_inv.detector import Detector
 from xai_inv.explainers import aggregate_to_words, explain_ig, token_word_ids
@@ -29,6 +30,34 @@ def test_aggregate_sums_subtokens():
 def test_aggregate_rejects_length_mismatch():
     with pytest.raises(ValueError):
         aggregate_to_words("a b", [(0, 0), (0, 1), (2, 3), (0, 0)], [1.0, 2.0])
+
+
+def test_explain_passes_arguments_and_aggregates_to_words(monkeypatch):
+    class FakeTokenizer:
+        def __call__(self, text, truncation, return_offsets_mapping):
+            return {"offset_mapping": [(0, 0), (0, 1), (2, 4), (4, 5), (0, 0)]}
+
+    class FakeExplainer:
+        def __init__(self, model, tokenizer):
+            assert model == "model"
+
+        def __call__(self, text, target, call_args):
+            assert (text, target, call_args) == ("a bc.", 1, {"n_samples": 3})
+            return type("Explanation", (), {"scores": np.array([0.0, 1.0, 2.0, 3.0, 0.5])})
+
+    monkeypatch.setitem(explainers.EXPLAINERS, "fake", FakeExplainer)
+    detector = type("Detector", (), {"model": "model", "tokenizer": FakeTokenizer()})
+
+    att = explainers.explain(detector, "fake", "a bc.", 1, call_args={"n_samples": 3})
+
+    assert att.words == ["a", "bc."]
+    np.testing.assert_allclose(att.scores, [1.0, 5.0])
+    assert att.nonword_score == 0.5
+
+
+def test_explain_rejects_unknown_method():
+    with pytest.raises(ValueError, match="Unknown explainer"):
+        explainers.explain(None, "occlusion", "a", 1)
 
 
 @pytest.fixture(scope="module")

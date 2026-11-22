@@ -48,10 +48,21 @@ def aggregate_to_words(text: str, offsets, token_scores) -> WordAttribution:
     return WordAttribution(words, scores, nonword)
 
 
-def explain_ig(detector: Detector, text: str, target: int, n_steps: int = 50) -> WordAttribution:
-    explainer = IntegratedGradientExplainer(detector.model, detector.tokenizer)
-    explanation = explainer(text, target=target, call_args={"n_steps": n_steps})
+EXPLAINERS = {"ig": IntegratedGradientExplainer}
+
+
+def explain(
+    detector: Detector, method: str, text: str, target: int, **explainer_args
+) -> WordAttribution:
+    if method not in EXPLAINERS:
+        raise ValueError(f"Unknown explainer: {method}")
+    explainer = EXPLAINERS[method](detector.model, detector.tokenizer)
+    explanation = explainer(text, target=target, **explainer_args)
     offsets = detector.tokenizer(text, truncation=True, return_offsets_mapping=True)[
         "offset_mapping"
     ]
     return aggregate_to_words(text, offsets, explanation.scores)
+
+
+def explain_ig(detector: Detector, text: str, target: int, n_steps: int = 50) -> WordAttribution:
+    return explain(detector, "ig", text, target, call_args={"n_steps": n_steps})
