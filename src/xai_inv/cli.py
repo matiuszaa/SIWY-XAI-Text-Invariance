@@ -1,11 +1,12 @@
 from pathlib import Path
 from typing import Annotated
 
+import pandas as pd
 import typer
 
 from xai_inv import data
 from xai_inv.config import load_config
-from xai_inv.explanations import explain_texts
+from xai_inv.explanations import explain_texts, timing_summary
 from xai_inv.metrics import compute_metrics
 from xai_inv.quality import apply_filters
 from xai_inv.report import create_report
@@ -70,6 +71,8 @@ def explain(config: ConfigOption = DEFAULT_CONFIG) -> None:
     cfg = load_config(config)
     out_path = explain_texts(cfg)
     typer.echo(f"[{cfg.name}] explanations written to {out_path}")
+    summary = timing_summary(pd.read_parquet(out_path))
+    typer.echo(f"[{cfg.name}] seconds per explanation:\n{summary.round(2).to_string(index=False)}")
 
 
 @app.command()

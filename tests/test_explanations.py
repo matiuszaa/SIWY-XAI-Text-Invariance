@@ -93,6 +93,28 @@ def test_explain_texts_reuses_cached_explanations(pairs_dir, calls):
     assert [method for method, _, _ in calls[n_first:]] == ["ig", "ig", "ig"]
 
 
+def test_explain_texts_records_time_and_device(pairs_dir, calls):
+    result = pd.read_parquet(explanations.explain_texts(make_cfg(pairs_dir)))
+    assert (result.seconds >= 0).all()
+    assert set(result.device) == {"cpu"}
+
+
+def test_timing_summary_skips_rows_without_time():
+    result = explanations.timing_summary(
+        pd.DataFrame(
+            {
+                "method": ["ig", "ig", "lime", "lime"],
+                "device": ["cuda", "cuda", "cuda", "cuda"],
+                "seconds": [1.0, 3.0, 10.0, None],
+            }
+        )
+    )
+    assert result.method.tolist() == ["ig", "lime"]
+    assert result["count"].tolist() == [2, 1]
+    assert result["mean"].tolist() == [2.0, 10.0]
+    assert result["sum"].tolist() == [4.0, 10.0]
+
+
 def test_run_explainer_rejects_unknown_method():
     with pytest.raises(ValueError, match="Unknown explainer"):
         explanations.run_explainer(None, "occlusion", OmegaConf.create({}), "a", 0, None)

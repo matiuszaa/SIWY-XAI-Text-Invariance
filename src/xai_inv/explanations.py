@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -21,8 +22,19 @@ EXPLANATION_COLUMNS = [
     "words",
     "scores",
     "nonword_score",
+    "seconds",
+    "device",
     "params_hash",
 ]
+
+
+def timing_summary(explanations: pd.DataFrame) -> pd.DataFrame:
+    timed = explanations[explanations.seconds.notna()]
+    return (
+        timed.groupby(["method", "device"])
+        .seconds.agg(["count", "mean", "median", "max", "sum"])
+        .reset_index()
+    )
 
 
 def run_explainer(
@@ -122,9 +134,11 @@ def explain_texts(cfg: DictConfig) -> Path:
                 if row is None or row["params_hash"] != expected_hash:
                     if detector is None:
                         detector = Detector(cfg.detector.model, device=cfg.detector.device)
+                    start = time.perf_counter()
                     attribution = run_explainer(
                         detector, method, params, entry["text"], entry["target"], seed
                     )
+                    seconds = time.perf_counter() - start
                     row = {
                         "text_key": key,
                         "text": entry["text"],
@@ -136,6 +150,8 @@ def explain_texts(cfg: DictConfig) -> Path:
                         "words": attribution.words,
                         "scores": attribution.scores.tolist(),
                         "nonword_score": attribution.nonword_score,
+                        "seconds": seconds,
+                        "device": cfg.detector.device,
                         "params_hash": expected_hash,
                     }
                     done[(key, method, run)] = row
