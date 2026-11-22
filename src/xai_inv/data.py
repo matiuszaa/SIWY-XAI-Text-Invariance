@@ -26,6 +26,10 @@ def sha256_texts(df: pd.DataFrame) -> str:
     return h.hexdigest()
 
 
+def text_key(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
 def download_hc3(dataset: str, revision: str, raw_dir: Path) -> Path:
     path = hf_hub_download(
         dataset, HC3_FILE, repo_type="dataset", revision=revision, local_dir=raw_dir / "hc3"

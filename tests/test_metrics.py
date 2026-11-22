@@ -4,6 +4,7 @@ import pytest
 from omegaconf import OmegaConf
 
 from xai_inv import metrics
+from xai_inv.data import text_key
 from xai_inv.metrics import (
     align_attributions,
     as_targets,
@@ -56,9 +57,10 @@ def test_compute_metrics_aligns_pairs_without_saved_mapping(tmp_path, monkeypatc
     ).to_parquet(tmp_path / "filtered_pairs.parquet", index=False)
     pd.DataFrame(
         {
-            "pair_id": ["accepted", "accepted", "unaligned", "unaligned"],
-            "version": ["original", "transformed", "original", "transformed"],
-            "ig_scores": [[0.1, 0.9, -0.2], [0.1, 0.9, -0.2], [0.1, 0.9, -0.2], [-0.2, 0.1]],
+            "text_key": [text_key(t) for t in ["x y z", "x y w", "z x", "x y z"]],
+            "method": ["ig", "ig", "ig", "ig"],
+            "run": ["main", "main", "main", "rerun"],
+            "scores": [[0.1, 0.9, -0.2], [0.1, 0.9, -0.2], [-0.2, 0.1], [0.0, 0.0, 1.0]],
         }
     ).to_parquet(tmp_path / "explanations.parquet", index=False)
     cfg = OmegaConf.create(
@@ -84,6 +86,7 @@ def test_compute_metrics_aligns_pairs_without_saved_mapping(tmp_path, monkeypatc
 
     assert out_path == tmp_path / "metrics.parquet"
     assert result.pair_id.tolist() == ["accepted", "unaligned"]
+    assert result.method.tolist() == ["ig", "ig"]
     assert [[t.tolist() for t in a] for a in result.word_alignment] == [
         [[0], [1], [2]],
         [[1], [], [0]],

@@ -53,6 +53,7 @@ explainers:
   lime:
     n_samples: 1000
     seed: 42
+    rerun_seed: 43
   shap:
     max_evals: 500
     seed: 42

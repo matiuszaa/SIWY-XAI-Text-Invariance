@@ -7,11 +7,13 @@ from omegaconf import DictConfig
 from scipy.stats import spearmanr
 
 from xai_inv.alignment import WordAligner, alignment_coverage
+from xai_inv.data import text_key
 
 METRIC_COLUMNS = [
     "pair_id",
     "text_id",
     "transformation",
+    "method",
     "word_alignment",
     "alignment_coverage",
     "n_aligned_words",
@@ -88,7 +90,7 @@ def compute_metrics(cfg: DictConfig) -> Path:
         "word_alignment",
         "filter_status",
     }
-    required_explanation_columns = {"pair_id", "version", "ig_scores"}
+    required_explanation_columns = {"text_key", "method", "run", "scores"}
     missing_pairs = required_pair_columns - set(pairs.columns)
     missing_explanations = required_explanation_columns - set(explanations.columns)
     if missing_pairs:
@@ -101,6 +103,9 @@ def compute_metrics(cfg: DictConfig) -> Path:
         )
 
     fraction = float(cfg.metrics.top_k_fraction)
+    main = explanations[explanations.run.eq("main")]
+    methods = sorted(main.method.unique())
+    scores = {(row.text_key, row.method): row.scores for row in main.itertuples(index=False)}
     aligner = None
     rows = []
     for pair in pairs[pairs.filter_status.eq("accepted")].itertuples(index=False):
@@ -112,32 +117,30 @@ def compute_metrics(cfg: DictConfig) -> Path:
             word_alignment = aligner.align(pair.original_text, pair.transformed_text)
         else:
             word_alignment = as_targets(pair.word_alignment)
-        pair_explanations = explanations[explanations.pair_id.eq(pair.pair_id)]
-        by_version = pair_explanations.set_index("version")
-        if set(by_version.index) != {"original", "transformed"} or by_version.index.has_duplicates:
-            raise ValueError(
-                f"Expected one original and one transformed explanation for {pair.pair_id}"
-            )
 
-        original, transformed = align_attributions(
-            by_version.loc["original", "ig_scores"],
-            by_version.loc["transformed", "ig_scores"],
-            word_alignment,
-        )
-        k, jaccard = top_k_jaccard(original, transformed, fraction)
-        rows.append(
-            {
-                "pair_id": pair.pair_id,
-                "text_id": pair.text_id,
-                "transformation": pair.transformation,
-                "word_alignment": word_alignment,
-                "alignment_coverage": alignment_coverage(word_alignment),
-                "n_aligned_words": len(original),
-                "spearman": spearman_similarity(original, transformed),
-                "top_k": k,
-                "top_k_jaccard": jaccard,
-            }
-        )
+        keys = (text_key(pair.original_text), text_key(pair.transformed_text))
+        for method in methods:
+            missing = [key for key in keys if (key, method) not in scores]
+            if missing:
+                raise ValueError(f"Missing {method} explanation for {pair.pair_id}")
+            original, transformed = align_attributions(
+                scores[keys[0], method], scores[keys[1], method], word_alignment
+            )
+            k, jaccard = top_k_jaccard(original, transformed, fraction)
+            rows.append(
+                {
+                    "pair_id": pair.pair_id,
+                    "text_id": pair.text_id,
+                    "transformation": pair.transformation,
+                    "method": method,
+                    "word_alignment": word_alignment,
+                    "alignment_coverage": alignment_coverage(word_alignment),
+                    "n_aligned_words": len(original),
+                    "spearman": spearman_similarity(original, transformed),
+                    "top_k": k,
+                    "top_k_jaccard": jaccard,
+                }
+            )
 
     out_path = interim_dir / "metrics.parquet"
     pd.DataFrame(rows, columns=METRIC_COLUMNS).to_parquet(out_path, index=False)
