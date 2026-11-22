@@ -84,3 +84,13 @@ def test_explain_lime_word_level_and_seeded(detector):
     assert att.words == text.split()
     assert np.isfinite(att.scores).all()
     np.testing.assert_allclose(att.scores, same.scores)
+
+
+def test_explain_shap_word_level_and_deterministic(detector):
+    text = "When something is decriminalized , it wo n't go on your record.\n\nYou pay a fine."
+    max_evals = SMOKE.explainers.shap.max_evals
+    att = explainers.explain_shap(detector, text, target=1, max_evals=max_evals, seed=1)
+    same = explainers.explain_shap(detector, text, target=1, max_evals=max_evals, seed=1)
+    assert att.words == text.split()
+    assert np.isfinite(att.scores).all()
+    np.testing.assert_allclose(att.scores, same.scores)

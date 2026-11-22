@@ -37,6 +37,9 @@ explainers:
   lime:
     n_samples: 1000
     seed: 42
+  shap:
+    max_evals: 500
+    seed: 42
 
 alignment:
   model: google-bert/bert-base-multilingual-cased
